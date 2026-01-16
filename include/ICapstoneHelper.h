@@ -51,10 +51,9 @@ class ICapstoneHelper
 private:
 	csh mHandle = 0x0;
 
+protected:
 	cs_arch mArch;
 	cs_mode mMode;
-
-protected:
 
 	const unsigned char* mpBase;
 	size_t mBaseSize;

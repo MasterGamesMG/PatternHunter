@@ -89,7 +89,16 @@ int main(int argc, const char* argv[])
 	CapstoneHelperProvider capstoneHelperProvider;
 	ICapstoneHelper* binCapstoneHelper;
 
-	if (bin->MakeCapstoneHelper(&capstoneHelperProvider, &binCapstoneHelper) == false || binCapstoneHelper->Init() == false)
+	if (bin->MakeCapstoneHelper(&capstoneHelperProvider, &binCapstoneHelper) == false)
+	{
+		std::cout << "Unable to Create Capstone Helper." << std::endl;
+		return 1;
+	}
+
+	if (ELFHelper::IsThumb(file.data()))
+		binCapstoneHelper->setMode(CS_MODE_THUMB);
+
+	if (binCapstoneHelper->Init() == false)
 	{
 		std::cout << "Unable to Initialize Capstone, Check File Type." << std::endl;
 		return 1;

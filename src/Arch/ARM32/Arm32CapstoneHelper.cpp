@@ -148,62 +148,6 @@ bool Arm32CapstoneHelper::IsIntructionPrologRelated(cs_insn* pInst)
     return ArmCapstoneAux::HeuristicProlog(pInst);
 }
 
-#define MKWILDCARD(type, ...) {type, { __VA_ARGS__ }},
-
-std::unordered_map<arm_insn, WildcardTechnique> gImmDispWilcarding{
-    MKWILDCARD(ARM_INS_ADD, 0)
-    MKWILDCARD(ARM_INS_SUB, 0)
-
-    MKWILDCARD(ARM_INS_MOV, 0, 1, 2)
-    MKWILDCARD(ARM_INS_MOVW, 0, 1, 2)
-
-    MKWILDCARD(ARM_INS_BL, 0, 1, 2)
-    MKWILDCARD(ARM_INS_B, 0, 1, 2)
-
-    MKWILDCARD(ARM_INS_LDR, 0, 1)
-    MKWILDCARD(ARM_INS_LDRB, 0, 1)
-
-    MKWILDCARD(ARM_INS_STR, 0, 1)
-
-    MKWILDCARD(ARM_INS_CMP, 0, 1)
-    MKWILDCARD(ARM_INS_TST, 0, 1)
-};
-
-std::unordered_map<arm_insn, WildcardTechnique> gRegWilcarding{
-    MKWILDCARD(ARM_INS_ADD, 1, 2)
-    MKWILDCARD(ARM_INS_SUB, 1, 2)
-
-    MKWILDCARD(ARM_INS_MOV, 1)
-    MKWILDCARD(ARM_INS_MOVW, 1)
-
-    MKWILDCARD(ARM_INS_BL)
-    MKWILDCARD(ARM_INS_B)
-
-    MKWILDCARD(ARM_INS_LDR, 1, 2)
-    MKWILDCARD(ARM_INS_LDRB, 1, 2)
-
-    MKWILDCARD(ARM_INS_STR, 1, 2)
-
-    MKWILDCARD(ARM_INS_CMP, 3)
-    MKWILDCARD(ARM_INS_TST, 3)
-};
-
-WildcardTechnique GetImmDispWildcardTechArmIsnt(arm_insn type)
-{
-    if (gImmDispWilcarding.find(type) == gImmDispWilcarding.end())
-        return WildcardTechnique();
-
-    return gImmDispWilcarding[type];
-}
-
-WildcardTechnique GetRegWildcardTechArmIsnt(arm_insn type)
-{
-    if (gRegWilcarding.find(type) == gRegWilcarding.end())
-        return WildcardTechnique();
-
-    return gRegWilcarding[type];
-}
-
 bool Arm32CapstoneHelper::ContainsNonSolidOp(cs_insn* pInst, uint32_t* outResult, uint32_t toIgnoreNonSolidFlag, InstructionWildcardStrategy* pInstWildcardStrategy)
 {
     cs_arm* pArmInst = &(pInst->detail->arm);
@@ -211,54 +155,101 @@ bool Arm32CapstoneHelper::ContainsNonSolidOp(cs_insn* pInst, uint32_t* outResult
     if (pInstWildcardStrategy)
     {
         *pInstWildcardStrategy = InstructionWildcardStrategy();
-
         pInstWildcardStrategy->mSize = pInst->size;
     }
 
-    if (pArmInst->op_count < 1)
+    // Special handling for Thumb-2 32-bit instructions (4 bytes).
+    if (mMode == CS_MODE_THUMB && pInst->size == 4)
+    {
+        if (pInstWildcardStrategy)
+        {
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.clear();
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(2);
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(3);
+        }
+        if(outResult) *outResult = NS_IMMDISP; 
+        return true;
+    }
+
+    if (pArmInst->op_count < 1 && pInst->id != ARM_INS_BL && pInst->id != ARM_INS_B) // BL/B might have implict operands but usually explicit
         return false;
 
-    uint32_t alredyFoundNonSolid = 0;
-
-    for (int i = 0; i < pArmInst->op_count; i++)
+    // Branch Instructions (B, BL, BLX)
+    if (pInst->id == ARM_INS_B || pInst->id == ARM_INS_BL || pInst->id == ARM_INS_BLX)
     {
-        cs_arm_op* currOp = pArmInst->operands + i;
-
-        /*If called want to check for given nonsolid, and it hasnt alredy been found*/
-        if ((toIgnoreNonSolidFlag & NS_IMMDISP) && ((alredyFoundNonSolid & NS_IMMDISP) == 0))
+        if (pInstWildcardStrategy)
         {
-            do {
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.clear();
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
+            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(2);
+         }
+         if(outResult) *outResult = NS_IMMDISP;
+         return true;
+    }
 
-                if ((currOp->type == ARM_OP_MEM && currOp->mem.disp != 0 ||
-                    currOp->type == ARM_OP_IMM) == false)
-                    break;
-                
-                alredyFoundNonSolid |= NS_IMMDISP;
-
-                if (pInstWildcardStrategy)
-                    pInstWildcardStrategy->mTechnique += GetImmDispWildcardTechArmIsnt((arm_insn)pInst->id);
-
-                continue;
-            } while (false);
+    // Load/Store with Offset (LDR, STR, and variants)
+    if (pInst->id == ARM_INS_LDR || pInst->id == ARM_INS_STR || 
+        pInst->id == ARM_INS_LDRB || pInst->id == ARM_INS_STRB ||
+        pInst->id == ARM_INS_LDRH || pInst->id == ARM_INS_STRH ||
+        pInst->id == ARM_INS_LDRD || pInst->id == ARM_INS_STRD)
+    {
+        bool hasMemDisp = false;
+        for(int i=0; i<pArmInst->op_count; i++)
+        {
+            if(pArmInst->operands[i].type == ARM_OP_MEM || pArmInst->operands[i].type == ARM_OP_IMM)
+                hasMemDisp = true;
         }
 
-        /*If called want to check for given nonsolid, and it hasnt alredy been found*/
-        if ((toIgnoreNonSolidFlag & NS_REG) && ((alredyFoundNonSolid & NS_REG) == 0))
+        if(hasMemDisp)
         {
-            if (currOp->type == ARM_OP_REG)
+            if (pInstWildcardStrategy)
             {
-                alredyFoundNonSolid |= NS_REG;
-
-                if (pInstWildcardStrategy)
-                    pInstWildcardStrategy->mTechnique += GetRegWildcardTechArmIsnt((arm_insn)pInst->id);
-
-                continue;
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.clear();
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
             }
+            if(outResult) *outResult = NS_IMMDISP;
+            return true;
         }
     }
 
-    if (outResult)
-        *outResult = alredyFoundNonSolid;
+    // Arithmetic / Data Processing with Immediate (ADD, SUB, MOV, CMP, TST)
+    if (pInst->id == ARM_INS_ADD || pInst->id == ARM_INS_SUB || 
+        pInst->id == ARM_INS_MOV || pInst->id == ARM_INS_MOVW || 
+        pInst->id == ARM_INS_CMP || pInst->id == ARM_INS_TST)
+    {
+        bool hasImm = false;
+        for(int i=0; i<pArmInst->op_count; i++)
+            if(pArmInst->operands[i].type == ARM_OP_IMM) hasImm = true;
 
-    return alredyFoundNonSolid != 0;
+        if(hasImm)
+        {
+            if (pInstWildcardStrategy)
+            {
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.clear();
+                
+                if(pInst->id == ARM_INS_ADD || pInst->id == ARM_INS_SUB)
+                {
+                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+                }
+                else if(pInst->id == ARM_INS_MOV || pInst->id == ARM_INS_MOVW)
+                {
+                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
+                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(2);
+                }
+                else
+                {
+                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
+                }
+            }
+            if(outResult) *outResult = NS_IMMDISP;
+            return true;
+        }
+    }
+
+    return false;
 }
