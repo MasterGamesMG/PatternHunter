@@ -239,34 +239,40 @@ bool Arm64CapstoneHelper::ContainsNonSolidOp(cs_insn* pInst, uint32_t* outResult
     // Example: STRB W8, [X20, #imm] vs STRB W8, [X19, #imm2]
     // To match consistently, we must wildcard Bytes 0, 1, and 2.
     // This preserves Opcode (Byte 3).
-    // Includes LDR, LDRB, LDRH, LDRSW, STR, STRB, STRH.
+    // Includes LDR, LDRB, LDRH, LDRSW, STR, STRB, STRH, LDP, STP, LDPSW.
+    // Also includes Unscaled variants: STUR, LDUR, STURB, LDURB, STURH, LDURH, LDURSB, LDURSH, LDURSW.
     if ((pInst->id == AArch64_INS_LDR || pInst->id == AArch64_INS_LDRB || pInst->id == AArch64_INS_LDRH || pInst->id == AArch64_INS_LDRSW ||
-         pInst->id == AArch64_INS_STR || pInst->id == AArch64_INS_STRB || pInst->id == AArch64_INS_STRH) &&
+         pInst->id == AArch64_INS_STR || pInst->id == AArch64_INS_STRB || pInst->id == AArch64_INS_STRH ||
+         pInst->id == AArch64_INS_LDP || pInst->id == AArch64_INS_STP || pInst->id == AArch64_INS_LDPSW ||
+         pInst->id == AArch64_INS_STUR || pInst->id == AArch64_INS_LDUR || 
+         pInst->id == AArch64_INS_STURB || pInst->id == AArch64_INS_LDURB || 
+         pInst->id == AArch64_INS_STURH || pInst->id == AArch64_INS_LDURH || 
+         pInst->id == AArch64_INS_LDURSB || pInst->id == AArch64_INS_LDURSH || pInst->id == AArch64_INS_LDURSW) &&
          a64->op_count > 0)
     {
-         // Find if any operand is IMM (offset)
-         bool hasImmOffset = false;
+         // Find if any operand is IMM (offset) or MEM (even with 0 offset)
+         bool shouldWildcard = false;
          for (int i = 0; i < a64->op_count; i++) 
          {
              // Capstone might show LDR x0, [x1, #imm] as MEM with disp.
-             // OR LDR x0, #imm (Literal).
-             if (a64->operands[i].type == AArch64_OP_MEM && a64->operands[i].mem.disp != 0) hasImmOffset = true;
-             if (a64->operands[i].type == AArch64_OP_IMM) hasImmOffset = true;
+             // We want to wildcard ANY memory access with offset (even 0) or explicit IMM.
+             if (a64->operands[i].type == AArch64_OP_MEM) shouldWildcard = true;
+             if (a64->operands[i].type == AArch64_OP_IMM) shouldWildcard = true;
          }
 
-         if(hasImmOffset)
+         if(shouldWildcard)
          {
-             // Wildcard Bytes 0-2.
-             if (pInstructionWildcard)
-             {
-                  pInstructionWildcard->mTechnique.mWildcardedOffsets.clear();
-                  pInstructionWildcard->mSize = pInst->size;
-                  pInstructionWildcard->mTechnique.mWildcardedOffsets.insert(0);
-                  pInstructionWildcard->mTechnique.mWildcardedOffsets.insert(1);
-                  pInstructionWildcard->mTechnique.mWildcardedOffsets.insert(2);
-             }
-             if(outResult) *outResult = NS_IMMDISP;
-             return true;
+            // Wildcard Bytes 0-2.
+            if (pInstructionWildcard)
+            {
+            pInstructionWildcard->mTechnique.mWildcardedOffsets.clear();
+            pInstructionWildcard->mSize = pInst->size;
+            pInstructionWildcard->mTechnique.mWildcardedOffsets.insert(0);
+            pInstructionWildcard->mTechnique.mWildcardedOffsets.insert(1);
+            pInstructionWildcard->mTechnique.mWildcardedOffsets.insert(2);
+            }
+            if(outResult) *outResult = NS_IMMDISP;
+            return true;
          }
     }
 
