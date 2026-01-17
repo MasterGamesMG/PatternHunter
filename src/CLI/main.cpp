@@ -34,7 +34,8 @@ int main(int argc, const char* argv[])
 		("i,instructions", "Ammount of instruciton to process in the pattern creation", cxxopts::value<uint64_t>())
 		("v,verbose", "Show more Info", cxxopts::value<bool>()->default_value("false"))
 		("x,force", "Disable stoping at return related instrucitons", cxxopts::value<bool>()->default_value("false"))
-		("a,va", "Treat offset as Virtual Address", cxxopts::value<bool>()->default_value("false"));
+		("a,va", "Treat offset as Virtual Address", cxxopts::value<bool>()->default_value("false"))
+		("m,mode", "Force architecture mode (thumb/arm)", cxxopts::value<std::string>()->default_value("arm"));
 
 	auto result = options.parse(argc, argv);
 
@@ -95,8 +96,16 @@ int main(int argc, const char* argv[])
 		return 1;
 	}
 
-	if (ELFHelper::IsThumb(file.data()))
+	// Mode handling: explicit flag > auto-detection
+	std::string modeStr = result["mode"].as<std::string>();
+	if (modeStr == "thumb")
+	{
 		binCapstoneHelper->setMode(CS_MODE_THUMB);
+	}
+	else
+	{
+		binCapstoneHelper->setMode(CS_MODE_ARM);
+	}
 
 	if (binCapstoneHelper->Init() == false)
 	{
