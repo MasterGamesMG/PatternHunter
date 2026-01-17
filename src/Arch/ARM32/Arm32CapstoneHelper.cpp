@@ -175,15 +175,26 @@ bool Arm32CapstoneHelper::ContainsNonSolidOp(cs_insn* pInst, uint32_t* outResult
     if (pArmInst->op_count < 1 && pInst->id != ARM_INS_BL && pInst->id != ARM_INS_B) // BL/B might have implict operands but usually explicit
         return false;
 
-    // Branch Instructions (B, BL, BLX)
-    if (pInst->id == ARM_INS_B || pInst->id == ARM_INS_BL || pInst->id == ARM_INS_BLX)
+    // Branch Instructions (B, BL, BLX, CBZ, CBNZ)
+    if (pInst->id == ARM_INS_B || pInst->id == ARM_INS_BL || pInst->id == ARM_INS_BLX || 
+        pInst->id == ARM_INS_CBZ || pInst->id == ARM_INS_CBNZ)
     {
         if (pInstWildcardStrategy)
         {
             pInstWildcardStrategy->mTechnique.mWildcardedOffsets.clear();
-            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
-            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
-            pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(2);
+            if (pInst->size == 2)
+            {
+                // Thumb 16-bit B, CBZ, CBNZ: Wildcard Byte 0 (offset/imm5/rn)
+                // Opcode is in Byte 1 (mostly)
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+            }
+            else
+            {
+                // ARM/Thumb-2 32-bit: Wildcard 0, 1, 2 (24-bit offset)
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
+                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(2);
+            }
          }
          if(outResult) *outResult = NS_IMMDISP;
          return true;
@@ -207,9 +218,18 @@ bool Arm32CapstoneHelper::ContainsNonSolidOp(cs_insn* pInst, uint32_t* outResult
         {
             if (pInstWildcardStrategy)
             {
-                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.clear();
-                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
-                pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
+                 pInstWildcardStrategy->mTechnique.mWildcardedOffsets.clear();
+                 if (pInst->size == 2)
+                 {
+                     // Thumb 16-bit LDR Literal/Imm: Wildcard Byte 0
+                     pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+                 }
+                 else
+                 {
+                     // ARM/Thumb-2: Wildcard 0, 1
+                     pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
+                     pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
+                 }
             }
             if(outResult) *outResult = NS_IMMDISP;
             return true;
@@ -218,7 +238,7 @@ bool Arm32CapstoneHelper::ContainsNonSolidOp(cs_insn* pInst, uint32_t* outResult
 
     // Arithmetic / Data Processing with Immediate (ADD, SUB, MOV, CMP, TST, MOVT, MVN, AND, ORR, etc.)
     if (pInst->id == ARM_INS_ADD || pInst->id == ARM_INS_SUB || 
-        pInst->id == ARM_INS_MOV || pInst->id == ARM_INS_MOVW || pInst->id == ARM_INS_MOVT || pInst->id == ARM_INS_MVN ||
+        pInst->id == ARM_INS_MOV || pInst->id == ARM_INS_MOVW || pInst->id == ARM_INS_MOVT || pInst->id == ARM_INS_MVN || pInst->id == ARM_INS_MOVS ||
         pInst->id == ARM_INS_CMP || pInst->id == ARM_INS_TST || 
         pInst->id == ARM_INS_AND || pInst->id == ARM_INS_ORR || pInst->id == ARM_INS_EOR || pInst->id == ARM_INS_BIC)
     {
@@ -237,12 +257,15 @@ bool Arm32CapstoneHelper::ContainsNonSolidOp(cs_insn* pInst, uint32_t* outResult
                 {
                     pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
                 }
-                // MOV/MOVW/MOVT/MVN: Bytes 0, 1, 2 (Covers imm16 or imm12+rot and Rd)
-                else if(pInst->id == ARM_INS_MOV || pInst->id == ARM_INS_MOVW || pInst->id == ARM_INS_MOVT || pInst->id == ARM_INS_MVN)
+                // MOV/MOVW/MOVT/MVN/MOVS: Bytes 0, 1, 2 (Covers imm16 or imm12+rot and Rd)
+                else if(pInst->id == ARM_INS_MOV || pInst->id == ARM_INS_MOVW || pInst->id == ARM_INS_MOVT || pInst->id == ARM_INS_MVN || pInst->id == ARM_INS_MOVS)
                 {
                     pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(0);
-                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
-                    pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(2);
+                    if (pInst->size > 2)
+                    {
+                        pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(1);
+                        pInstWildcardStrategy->mTechnique.mWildcardedOffsets.insert(2);
+                    }
                 }
                 // CMP/TST/Logic: Bytes 0, 1
                 else
